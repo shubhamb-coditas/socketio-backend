@@ -4,6 +4,7 @@ import Picker from 'emoji-picker-react';
 
 const ChatRoom = () => {
   const [roomName, setRoomName] = useState('');
+  const [userName, setUserName] = useState('');
   const [message, setMessage] = useState('');
   const [receivedMessages, setReceivedMessages] = useState([]);
   const [socket, setSocket] = useState(null);
@@ -14,10 +15,10 @@ const ChatRoom = () => {
 
   const SERVER_URL = "http://localhost:9090";
 
-  // Function to join the chat room
   const joinRoom = () => {
+    const token = localStorage.getItem('userToken') || '';
     const newSocket = io(SERVER_URL, {
-      query: { room: roomName },
+      query: { room: roomName, token: token, username: userName },
       withCredentials: true,
       transports: ['websocket'],
       reconnectionAttempts: 1
@@ -29,9 +30,24 @@ const ChatRoom = () => {
     });
 
     newSocket.on('get_message', (message) => {
-      console.log(message);
-      setReceivedMessages((prevReceivedMessages) => [...prevReceivedMessages, message]);
+      console.log('Received message:', message);
+      setReceivedMessages((prevReceivedMessages) => {
+        if (!prevReceivedMessages.some(msg => msg.id === message.id)) {
+          return [...prevReceivedMessages, message];
+        }
+        return prevReceivedMessages;
+      });
       scrollToBottom();
+    });
+
+    newSocket.on('chat_history', (history) => {
+      setReceivedMessages(history);
+      scrollToBottom();
+    });
+
+    newSocket.on('assign_token', (token) => {
+      localStorage.setItem('userToken', token);
+      console.log('Received new token:', token);
     });
 
     newSocket.on('connect_error', (error) => {
@@ -49,26 +65,27 @@ const ChatRoom = () => {
     setSocket(newSocket);
   };
 
-  // Function to send a message
   const sendMessage = () => {
     const serverMessage = {
+      type: "CLIENT",
       text: message,
       room: roomName,
       sender: socketId,
-      mediaFile: selectedFile  // Include selected file in the message object
+      mediaFile: selectedFile ? Array.from(new Uint8Array(selectedFile.data)) : null,
+      mediaFileName: selectedFile ? selectedFile.fileName : null,
+      mediaFileType: selectedFile ? selectedFile.fileType : null
     };
 
-    setReceivedMessages((prevReceivedMessages) => [...prevReceivedMessages, serverMessage]);
     if (socket) {
-      socket.emit('send_message', serverMessage);
-      console.log(serverMessage);
-      setMessage('');
-      setSelectedFile(null); // Reset selected file after sending
-      scrollToBottom();
+      socket.emit('send_message', serverMessage, (ack) => {
+        console.log('Message ACK:', ack);
+        setMessage('');
+        setSelectedFile(null);
+        scrollToBottom();
+      });
     }
   };
 
-  // Function to handle emoji click
   const handleEmojiClick = (emojiObject) => {
     const emoji = emojiObject?.emoji;
     if (emoji) {
@@ -76,7 +93,6 @@ const ChatRoom = () => {
     }
   };
 
-  // Function to handle file selection
   const handleFileChange = (event) => {
     const efile = event.target.files[0];
     const reader = new FileReader();
@@ -85,33 +101,30 @@ const ChatRoom = () => {
       const file = {
         fileName: efile.name,
         fileType: efile.type,
-        data: Array.from(buffer)
+        data: buffer
       };
-      setSelectedFile(file);  // Set file after reading
+      setSelectedFile(file);
     };
     reader.readAsArrayBuffer(efile);
   };
 
-  // Function to download file
   const downloadFile = (file) => {
-    const blob = new Blob([new Uint8Array(file.data)], { type: file.fileType });
+    const blob = new Blob([new Uint8Array(file.mediaFile)], { type: file.mediaFileType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = file.fileName;
+    link.download = file.mediaFileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Scroll to bottom function
   const scrollToBottom = () => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
   };
 
-  // Cleanup socket connection on component unmount
   useEffect(() => {
     return () => {
       if (socket) {
@@ -129,6 +142,13 @@ const ChatRoom = () => {
       <h1 className="text-3xl font-bold text-blue-500 mb-4">Chat Room</h1>
       {!socketId ? (
         <div className="flex flex-col items-center">
+          <input
+            type="text"
+            placeholder="Enter username"
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            className="p-2 border border-gray-300 rounded mb-4 w-80"
+          />
           <input
             type="text"
             placeholder="Enter room name"
@@ -169,9 +189,9 @@ const ChatRoom = () => {
                   {msg.text}
                   {msg.mediaFile && (
                     <div>
-                      <p>File: {msg.mediaFile.fileName} ({(msg.mediaFile.data.length / 1024).toFixed(2)} KB)</p>
+                      <p>File: {msg.mediaFileName} ({(msg.mediaFile.length / 1024).toFixed(2)} KB)</p>
                       <button
-                        onClick={() => downloadFile(msg.mediaFile)}
+                        onClick={() => downloadFile(msg)}
                         className="px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-700"
                       >
                         Download

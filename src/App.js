@@ -12,6 +12,7 @@ const ChatRoom = () => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]);
   const messageListRef = useRef(null);
 
   const SERVER_URL = "http://localhost:9090";
@@ -73,6 +74,22 @@ const ChatRoom = () => {
         }
         return prevTypingUsers;
       });
+
+    });
+
+    newSocket.on('user_status', (data) => {
+      console.log('User status received:', data);
+      setOnlineUsers((prevOnlineUsers) => {
+        const userIndex = prevOnlineUsers.findIndex(user => user.username === data.username);
+        if (userIndex === -1) {
+          return [...prevOnlineUsers, data];
+        } else {
+          const updatedUsers = [...prevOnlineUsers];
+          updatedUsers[userIndex] = data;
+          return updatedUsers;
+        }
+      });
+
     });
 
     newSocket.on('connect_error', (error) => {
@@ -213,6 +230,18 @@ const ChatRoom = () => {
             <div className="text-xl mb-2">Room: {roomName}</div>
             <div className="text-xl mb-4">Client ID: {socketId}</div>
           </div>
+          <div className="w-full mb-4">
+            <div className="text-xl mb-2">Online Users:</div>
+            <ul className="list-none p-0">
+              {onlineUsers
+                .filter(user => user.username !== userName) // Exclude current user
+                .map((user, index) => (
+                  <li key={index} className="text-sm text-gray-500">
+                    {user.username}: {user.online ? 'Online' : 'Offline'}
+                  </li>
+              ))}
+            </ul>
+          </div>
           <div className="flex-grow w-full overflow-y-auto mb-4" ref={messageListRef} style={{ paddingBottom: '100px' }}>
             <h2 className="text-2xl font-bold text-gray-700 mb-2">Messages:</h2>
             <ul className="list-none p-0">
@@ -255,6 +284,7 @@ const ChatRoom = () => {
               ))}
             </div>
           </div>
+         
           <div className="w-full flex items-center p-2 border-t border-gray-300 bg-white fixed bottom-0 left-0">
             <button
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}

@@ -231,7 +231,7 @@ const ChatRoom = () => {
             <div className="text-xl mb-4">Client ID: {socketId}</div>
           </div>
           <div className="w-full mb-4">
-            <div className="text-xl mb-2">Online Users:</div>
+          <h2 className="text-2xl font-bold text-gray-700 mb-2">Online Users:</h2>
             <ul className="list-none p-0">
               {onlineUsers
                 .filter(user => user.username !== userName) // Exclude current user

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef , useCallback} from 'react';
 import { io } from 'socket.io-client';
 import Picker from 'emoji-picker-react';
 
@@ -11,6 +11,8 @@ const ChatRoom = () => {
   const [socketId, setSocketId] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]);
   const messageListRef = useRef(null);
 
   const SERVER_URL = "http://localhost:9090";
@@ -50,6 +52,46 @@ const ChatRoom = () => {
       console.log('Received new token:', token);
     });
 
+    newSocket.on('typing_status', (data) => {
+      console.log('Typing status received:', data);
+      setTypingUsers((prevTypingUsers) => {
+        const userIndex = prevTypingUsers.findIndex(user => user.sender === data.sender);
+        if (data.typing) {
+          if (userIndex === -1) {
+            console.log('Adding user to typing users:', data.sender);
+            return [...prevTypingUsers, data];
+          } else {
+            console.log('Updating typing status for user:', data.sender);
+            const updatedUsers = [...prevTypingUsers];
+            updatedUsers[userIndex] = data;
+            return updatedUsers;
+          }
+        } else {
+          if (userIndex !== -1) {
+            console.log('Removing user from typing users:', data.sender);
+            return prevTypingUsers.filter(user => user.sender !== data.sender);
+          }
+        }
+        return prevTypingUsers;
+      });
+
+    });
+
+    newSocket.on('user_status', (data) => {
+      console.log('User status received:', data);
+      setOnlineUsers((prevOnlineUsers) => {
+        const userIndex = prevOnlineUsers.findIndex(user => user.username === data.username);
+        if (userIndex === -1) {
+          return [...prevOnlineUsers, data];
+        } else {
+          const updatedUsers = [...prevOnlineUsers];
+          updatedUsers[userIndex] = data;
+          return updatedUsers;
+        }
+      });
+
+    });
+
     newSocket.on('connect_error', (error) => {
       console.error('Connection Error:', error.message);
     });
@@ -82,6 +124,7 @@ const ChatRoom = () => {
         setMessage('');
         setSelectedFile(null);
         scrollToBottom();
+        sendTypingStatus(false);
       });
     }
   };
@@ -125,6 +168,13 @@ const ChatRoom = () => {
     }
   };
 
+  const sendTypingStatus = useCallback((isTyping) => {
+    if (socket) {
+      console.log(`Sending typing status: ${isTyping}`);
+      socket.emit('typing', { room: roomName, sender: userName,typing: isTyping });
+    }
+  }, [socket, roomName, userName]);
+
   useEffect(() => {
     return () => {
       if (socket) {
@@ -136,6 +186,17 @@ const ChatRoom = () => {
   useEffect(() => {
     scrollToBottom();
   }, [receivedMessages]);
+
+  useEffect(() => {
+    const handleTyping = (event) => {
+      sendTypingStatus(event.target.value.length > 0);
+    };
+
+    window.addEventListener('input', handleTyping);
+    return () => {
+      window.removeEventListener('input', handleTyping);
+    };
+  }, [sendTypingStatus]);
 
   return (
     <div className="flex flex-col items-center p-4 h-screen bg-gray-100">
@@ -169,6 +230,18 @@ const ChatRoom = () => {
             <div className="text-xl mb-2">Room: {roomName}</div>
             <div className="text-xl mb-4">Client ID: {socketId}</div>
           </div>
+          <div className="w-full mb-4">
+          <h2 className="text-2xl font-bold text-gray-700 mb-2">Online Users:</h2>
+            <ul className="list-none p-0">
+              {onlineUsers
+                .filter(user => user.username !== userName) // Exclude current user
+                .map((user, index) => (
+                  <li key={index} className="text-sm text-gray-500">
+                    {user.username}: {user.online ? 'Online' : 'Offline'}
+                  </li>
+              ))}
+            </ul>
+          </div>
           <div className="flex-grow w-full overflow-y-auto mb-4" ref={messageListRef} style={{ paddingBottom: '100px' }}>
             <h2 className="text-2xl font-bold text-gray-700 mb-2">Messages:</h2>
             <ul className="list-none p-0">
@@ -201,7 +274,17 @@ const ChatRoom = () => {
                 </li>
               ))}
             </ul>
+            <div className="text-sm text-gray-500">
+              {typingUsers
+                .filter(user => user.sender !== userName) // Exclude current user
+                .map((user, index) => (
+                  <div key={index}>
+                    {user.sender} is typing...
+                  </div>
+              ))}
+            </div>
           </div>
+         
           <div className="w-full flex items-center p-2 border-t border-gray-300 bg-white fixed bottom-0 left-0">
             <button
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
@@ -227,6 +310,8 @@ const ChatRoom = () => {
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
               className="p-2 border border-gray-300 rounded w-full mx-2"
+              onInput={() => sendTypingStatus(true)}
+              onBlur={() => sendTypingStatus(false)}
             />
             <button
               onClick={sendMessage}

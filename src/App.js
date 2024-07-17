@@ -31,16 +31,23 @@ const ChatRoom = () => {
       setSocketId(newSocket.id);
     });
 
+
     newSocket.on('get_message', (message) => {
       console.log('Received message:', message);
       setReceivedMessages((prevReceivedMessages) => {
-        if (!prevReceivedMessages.some(msg => msg.id === message.id)) {
+        const messageExists = prevReceivedMessages.some(msg => msg.id === message.id);
+        if (messageExists) {
+          // Update existing message
+          return prevReceivedMessages.map(msg => msg.id === message.id ? message : msg);
+        } else {
+          // Add new message
           return [...prevReceivedMessages, message];
         }
-        return prevReceivedMessages;
       });
       scrollToBottom();
     });
+
+
 
     newSocket.on('chat_history', (history) => {
       setReceivedMessages(history);
@@ -92,6 +99,14 @@ const ChatRoom = () => {
 
     });
 
+        // New event listener for message status updates
+        newSocket.on('message_status_updated', (updatedMessage) => {
+          console.log('Message status updated:', updatedMessage);
+          setReceivedMessages((prevReceivedMessages) => {
+            return prevReceivedMessages.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg);
+          });
+        });
+
     newSocket.on('connect_error', (error) => {
       console.error('Connection Error:', error.message);
     });
@@ -109,16 +124,20 @@ const ChatRoom = () => {
 
   const sendMessage = () => {
     const serverMessage = {
+      id: new Date().toISOString(), // Generate a temporary ID for the message
       type: "CLIENT",
       text: message,
       room: roomName,
-      sender: socketId,
+      sender: userName,
       mediaFile: selectedFile ? Array.from(new Uint8Array(selectedFile.data)) : null,
       mediaFileName: selectedFile ? selectedFile.fileName : null,
-      mediaFileType: selectedFile ? selectedFile.fileType : null
+      mediaFileType: selectedFile ? selectedFile.fileType : null,
+      status: "SENT" 
     };
 
     if (socket) {
+      // Adding the sent message to the list of received messages with status "SENT"
+      setReceivedMessages(prevMessages => [...prevMessages, serverMessage]);
       socket.emit('send_message', serverMessage, (ack) => {
         console.log('Message ACK:', ack);
         setMessage('');
@@ -198,6 +217,35 @@ const ChatRoom = () => {
     };
   }, [sendTypingStatus]);
 
+    // New useEffect to handle updating message status to "RECEIVED"
+    useEffect(() => {
+      if (socket) {
+      receivedMessages.forEach((message) => {
+        if (message.status === 'SENT' && message.sender !== userName) {
+          socket.emit('update_message_status', { ...message, status: 'RECEIVED' });
+        }
+      });
+    }
+    }, [receivedMessages, socket, userName]);
+  
+    // New useEffect to handle updating message status to "READ"
+    useEffect(() => {
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible'  && socket) {
+          receivedMessages.forEach((message) => {
+            if (message.status === 'RECEIVED' && message.sender !== userName) {
+              socket.emit('update_message_status', { ...message, status: 'READ' });
+            }
+          });
+        }
+      };
+  
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }, [receivedMessages, socket, userName]);
+
   return (
     <div className="flex flex-col items-center p-4 h-screen bg-gray-100">
       <h1 className="text-3xl font-bold text-blue-500 mb-4">Chat Room</h1>
@@ -248,11 +296,11 @@ const ChatRoom = () => {
               {receivedMessages.map((msg, index) => (
                 <li
                   key={index}
-                  className={`p-2 mb-1 text-sm ${msg.sender === socketId ? 'bg-green-200 self-end text-right' : 'bg-gray-200 self-start text-left'}`}
+                  className={`p-2 mb-1 text-sm ${msg.sender === userName ? 'bg-green-200 self-end text-right' : 'bg-gray-200 self-start text-left'}`}
                   style={{ 
                     maxWidth: '70%', 
-                    marginLeft: msg.sender === socketId ? 'auto' : '0', 
-                    marginRight: msg.sender === socketId ? '0' : 'auto',
+                    marginLeft: msg.sender === userName ? 'auto' : '0', 
+                    marginRight: msg.sender === userName ? '0' : 'auto',
                     borderRadius: '20px',
                     padding: '10px 15px',
                     position: 'relative',
@@ -269,6 +317,14 @@ const ChatRoom = () => {
                       >
                         Download
                       </button>
+                    </div>
+                  )}
+                  {msg.sender === userName && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    {msg.status === 'SENT' && <span>✔️</span>} {/* Indicating sent message */}
+                    {msg.status === 'RECEIVED' && <span>✔️✔️</span>} {/* Indicating received message */}
+                    {msg.status === 'READ' && <span style={{ color: 'blue' }}>✔️✔️</span>} {/* Indicating read message */}
+
                     </div>
                   )}
                 </li>

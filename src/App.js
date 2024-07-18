@@ -40,11 +40,17 @@ const ChatRoom = () => {
           // Update existing message
           return prevReceivedMessages.map(msg => msg.id === message.id ? message : msg);
         } else {
-          // Add new message
+          // Add new message  
           return [...prevReceivedMessages, message];
         }
       });
       scrollToBottom();
+
+            // Update message status to DELIVERED
+            if (message.status === 'SENT' && message.sender !== userName) {
+              newSocket.emit('update_message_status', { ...message, status: 'DELIVERED' });
+            }
+
     });
 
 
@@ -217,34 +223,35 @@ const ChatRoom = () => {
     };
   }, [sendTypingStatus]);
 
-    // New useEffect to handle updating message status to "RECEIVED"
-    useEffect(() => {
-      if (socket) {
-      receivedMessages.forEach((message) => {
-        if (message.status === 'SENT' && message.sender !== userName) {
-          socket.emit('update_message_status', { ...message, status: 'RECEIVED' });
-        }
-      });
-    }
-    }, [receivedMessages, socket, userName]);
   
     // New useEffect to handle updating message status to "READ"
     useEffect(() => {
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible'  && socket) {
-          receivedMessages.forEach((message) => {
-            if (message.status === 'RECEIVED' && message.sender !== userName) {
+      const observerCallback = (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const messageId = entry.target.id;
+            const message = receivedMessages.find(msg => msg.id === messageId);
+  
+            if (message && message.status === 'DELIVERED' && message.sender !== userName) {
               socket.emit('update_message_status', { ...message, status: 'READ' });
             }
-          });
-        }
+          }
+        });
       };
-  
-      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      const observer = new IntersectionObserver(observerCallback, {
+      threshold: 1.0 // Fully in view
+    });
+
+      const messageItems = document.querySelectorAll('.message-item');
+      messageItems.forEach(item => observer.observe(item));
+   
       return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+        messageItems.forEach(item => observer.unobserve(item));
       };
     }, [receivedMessages, socket, userName]);
+
 
   return (
     <div className="flex flex-col items-center p-4 h-screen bg-gray-100">
@@ -296,7 +303,8 @@ const ChatRoom = () => {
               {receivedMessages.map((msg, index) => (
                 <li
                   key={index}
-                  className={`p-2 mb-1 text-sm ${msg.sender === userName ? 'bg-green-200 self-end text-right' : 'bg-gray-200 self-start text-left'}`}
+                  id={msg.id}
+                  className={`p-2 mb-1 text-sm ${msg.sender === userName ? 'bg-green-200 self-end text-right' : 'bg-gray-200 self-start text-left'} message-item`}
                   style={{ 
                     maxWidth: '70%', 
                     marginLeft: msg.sender === userName ? 'auto' : '0', 
@@ -321,9 +329,9 @@ const ChatRoom = () => {
                   )}
                   {msg.sender === userName && (
                   <div className="text-xs text-gray-500 mt-1">
-                    {msg.status === 'SENT' && <span>✔️</span>} {/* Indicating sent message */}
-                    {msg.status === 'RECEIVED' && <span>✔️✔️</span>} {/* Indicating received message */}
-                    {msg.status === 'READ' && <span style={{ color: 'blue' }}>✔️✔️</span>} {/* Indicating read message */}
+                    {msg.status === 'SENT' && <span>✓</span>} {/* Indicating sent message */}
+                    {msg.status === 'DELIVERED' && <span>✓✓</span>} {/* Indicating received message */}
+                    {msg.status === 'READ' && <span style={{ color: 'blue' }}>✓✓</span>} {/* Indicating read message */}
 
                     </div>
                   )}
